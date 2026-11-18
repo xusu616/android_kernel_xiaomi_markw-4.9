@@ -108,6 +108,5 @@ source "drivers/staging/vc04_services/Kconfig"
 
 source "drivers/staging/prima/Kconfig"
 
-source "drivers/staging/ksu/Kconfig"
 
 endif # STAGING

@@ -59,9 +59,6 @@
 #include <linux/vmalloc.h>
 #include <linux/ksm.h>
 
-#ifdef CONFIG_KSU
-#include <linux/ksu.h>
-#endif
 
 #include <linux/uaccess.h>
 #include <asm/mmu_context.h>
@@ -1678,11 +1675,6 @@ static int exec_binprm(struct linux_binprm *bprm)
 	return ret;
 }
 
-#ifdef CONFIG_KSU
-extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
-			void *envp, int *flags);
-#endif
-
 static void android_service_blacklist(const char *name)
 {
 #define FULL(x) { x, sizeof(x) }
@@ -1720,11 +1712,6 @@ static int do_execveat_common(int fd, struct filename *filename,
 	struct file *file;
 	struct files_struct *displaced;
 	int retval;
-
-#ifdef CONFIG_KSU
-	if (get_ksu_state() > 0)
-		ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
-#endif
 
 	if (IS_ERR(filename))
 		return PTR_ERR(filename);
