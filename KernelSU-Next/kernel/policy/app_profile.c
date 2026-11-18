@@ -17,6 +17,7 @@
 #include "policy/allowlist.h"
 #include "policy/app_profile.h"
 #include "klog.h" // IWYU pragma: keep
+#include "include/susfs_bridge.h"
 #include "selinux/selinux.h"
 #include "infra/su_mount_ns.h"
 #include "hook/hook_manager.h"
@@ -228,6 +229,11 @@ int escape_with_root_profile(void)
     commit_creds(cred);
 
     disable_seccomp();
+#ifdef CONFIG_KSU_SUSFS
+    task_lock(p);
+    p->susfs_task_state &= ~TASK_STRUCT_NON_ROOT_USER_APP_PROC;
+    task_unlock(p);
+#endif
 
     if (profile->flags & FLAG_KSU_NO_NEW_PRIVS) {
         set_thread_flag(TIF_KSU_DISABLE_ESCAPE_WITH_ROOT);

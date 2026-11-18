@@ -21,6 +21,11 @@
 #include "runtime/ksud_boot.h"
 #include "ksu.h"
 #include "compat/kernel_compat.h"
+#include "include/susfs_bridge.h"
+
+#ifdef CONFIG_KSU_SUSFS
+extern bool susfs_is_mnt_devname_ksu(struct path *path);
+#endif
 
 static bool ksu_kernel_umount_enabled = true;
 
@@ -79,24 +84,84 @@ static void ksu_sys_umount(const char *mnt, int flags)
 
 #endif
 
-static void try_umount(const char *mnt, int flags)
+static bool should_umount(struct path *path)
+{
+	if (!path)
+		return false;
+
+	if (current->nsproxy && current->nsproxy->mnt_ns == init_nsproxy.mnt_ns) {
+		pr_info("ignore global mnt namespace process: %d\n",
+			current_uid().val);
+		return false;
+	}
+
+#ifdef CONFIG_KSU_SUSFS
+	return susfs_is_mnt_devname_ksu(path);
+#else
+	if (path->mnt && path->mnt->mnt_sb && path->mnt->mnt_sb->s_type) {
+		const char *fstype = path->mnt->mnt_sb->s_type->name;
+		return strcmp(fstype, "overlay") == 0;
+	}
+	return false;
+#endif
+}
+
+#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+void ksu_try_umount(const char *mnt, bool check_mnt, int flags, uid_t uid)
+#else
+static void ksu_try_umount(const char *mnt, bool check_mnt, int flags)
+#endif
 {
 	struct path path;
 	int err = kern_path(mnt, 0, &path);
-	if (err) {
+	if (err)
 		return;
-	}
 
 	if (path.dentry != path.mnt->mnt_root) {
-		// it is not root mountpoint, maybe umounted by others already.
 		path_put(&path);
 		return;
 	}
-    ksu_umount_mnt(mnt, &path, flags);
+
+	if (check_mnt && !should_umount(&path)) {
+		path_put(&path);
+		return;
+	}
+
+#if defined(CONFIG_KSU_SUSFS_TRY_UMOUNT) && defined(CONFIG_KSU_SUSFS_ENABLE_LOG)
+	if (susfs_is_log_enabled)
+		pr_info("susfs: umounting '%s' for uid: %d\n", mnt, uid);
+#endif
+
+	ksu_umount_mnt(mnt, &path, flags);
 }
+
+#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+void susfs_try_umount_all(uid_t uid)
+{
+	struct mount_entry *entry;
+
+	susfs_try_umount(uid);
+
+	down_read(&mount_list_lock);
+	list_for_each_entry(entry, &mount_list, list) {
+		ksu_try_umount(entry->umountable, false, entry->flags, uid);
+	}
+	up_read(&mount_list_lock);
+
+	/* Legacy & Magic Mount fallback paths */
+	ksu_try_umount("/system", true, 0, uid);
+	ksu_try_umount("/system_ext", true, 0, uid);
+	ksu_try_umount("/vendor", true, 0, uid);
+	ksu_try_umount("/product", true, 0, uid);
+	ksu_try_umount("/odm", true, 0, uid);
+	ksu_try_umount("/data/adb/modules", false, MNT_DETACH, uid);
+	ksu_try_umount("/debug_ramdisk", true, MNT_DETACH, uid);
+}
+#endif
 
 struct umount_tw {
 	struct callback_head cb;
+	uid_t uid;
 };
 
 static void umount_tw_func(struct callback_head *cb)
@@ -104,13 +169,17 @@ static void umount_tw_func(struct callback_head *cb)
 	struct umount_tw *tw = container_of(cb, struct umount_tw, cb);
 	const struct cred *saved = override_creds(ksu_cred);
 
-    struct mount_entry *entry;
-    down_read(&mount_list_lock);
-    list_for_each_entry(entry, &mount_list, list) {
-        pr_info("%s: unmounting: %s flags: 0x%x\n", __func__, entry->umountable, entry->flags);
-        try_umount(entry->umountable, entry->flags);
-    }
-    up_read(&mount_list_lock);
+#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+	susfs_try_umount_all(tw->uid);
+#else
+	struct mount_entry *entry;
+	down_read(&mount_list_lock);
+	list_for_each_entry(entry, &mount_list, list) {
+		pr_info("%s: unmounting: %s flags: 0x%x\n", __func__, entry->umountable, entry->flags);
+		ksu_try_umount(entry->umountable, false, entry->flags);
+	}
+	up_read(&mount_list_lock);
+#endif
 
 	revert_creds(saved);
 
@@ -141,10 +210,21 @@ int ksu_handle_umount(uid_t old_uid, uid_t new_uid)
 	// 4. Webview zygote forked from zygote: zygote -> webview_zygote
 	// 5. Isolated process forked from app zygote: appuid -> isolated_process (already handled by 3)
 	// 6. Isolated process forked from webview zygote (already handled by 4)
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+	if (old_uid == 0 && unlikely(new_uid >= 1000 && new_uid < 10000) &&
+	    susfs_is_umount_for_zygote_system_process_enabled &&
+	    is_zygote(current_cred())) {
+		goto out_ksu_try_umount;
+	}
+#endif
+
 	if (!is_appuid(new_uid) && new_uid != WEBVIEW_ZYGOTE_UID && !is_isolated_process(new_uid)) {
 		return 0;
 	}
 
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+out_ksu_try_umount:
+#endif
 	if (!ksu_uid_should_umount(new_uid) && !is_isolated_process(new_uid)) {
 		return 0;
 	}
@@ -166,6 +246,7 @@ int ksu_handle_umount(uid_t old_uid, uid_t new_uid)
 		return 0;
 
 	tw->cb.func = umount_tw_func;
+	tw->uid = new_uid;
 
 	int err = task_work_add(current, &tw->cb, TWA_RESUME);
 	if (err) {

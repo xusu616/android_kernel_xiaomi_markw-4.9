@@ -72,4 +72,120 @@ config KSU_SYSCALL_TABLE_HOOK
 
 endchoice
 
+menu "KernelSU - SUSFS"
+
+config KSU_SUSFS
+	bool "KernelSU addon - SUSFS"
+	depends on KSU
+	default y
+	help
+	  Patch and Enable SUSFS to kernel with KernelSU.
+
+config KSU_SUSFS_HAS_MAGIC_MOUNT
+	bool "Say yes if the current KernelSU repo has magic mount implemented"
+	depends on KSU_SUSFS
+	default y
+	help
+	  Enable to indicate that the current SUSFS kernel supports Magic Mount KernelSU.
+
+config KSU_SUSFS_SUS_PATH
+	bool "Enable to hide suspicious path"
+	depends on KSU_SUSFS
+	default y
+	help
+	  Allow hiding user-defined paths and all sub-paths from various system calls.
+
+config KSU_SUSFS_SUS_MOUNT
+	bool "Enable to hide suspicious mounts"
+	depends on KSU_SUSFS
+	default y
+	help
+	  Allow hiding user-defined mount paths from /proc/self/[mounts|mountinfo|mountstat].
+
+config KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
+	bool "Enable to hide KSU's default mounts automatically"
+	depends on KSU_SUSFS_SUS_MOUNT
+	default y
+	help
+	  Automatically add KSU's default mounts to sus_mount.
+
+config KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+	bool "Enable to hide suspicious bind mounts automatically"
+	depends on KSU_SUSFS_SUS_MOUNT
+	default y
+	help
+	  Automatically add bind mounts from ksu domain to sus_mount.
+
+config KSU_SUSFS_SUS_KSTAT
+	bool "Enable to spoof suspicious kstat"
+	depends on KSU_SUSFS
+	default y
+	help
+	  Allow spoofing the kstat of user-defined file/directory.
+
+config KSU_SUSFS_SUS_OVERLAYFS
+	bool "Enable to automatically spoof kstat and kstatfs for overlayed files/directories"
+	depends on KSU_SUSFS
+	default n
+	help
+	  Automatically spoof kstat and kstatfs for overlayed files/directories.
+
+config KSU_SUSFS_TRY_UMOUNT
+	bool "Enable to use ksu's ksu_try_umount"
+	depends on KSU_SUSFS
+	default y
+	help
+	  Allow using ksu_try_umount to umount user-defined mount paths prior to default paths.
+
+config KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
+	bool "Enable to add bind mounts to ksu's ksu_try_umount automatically"
+	depends on KSU_SUSFS_TRY_UMOUNT
+	default y
+	help
+	  Automatically add bind mounts from ksu domain to ksu_try_umount.
+
+config KSU_SUSFS_SPOOF_UNAME
+	bool "Enable to spoof uname"
+	depends on KSU_SUSFS
+	default y
+	help
+	  Allow spoofing the string returned by uname syscall to user-defined string.
+
+config KSU_SUSFS_ENABLE_LOG
+	bool "Enable logging susfs log to kernel"
+	depends on KSU_SUSFS
+	default y
+	help
+	  Allow logging susfs log to kernel.
+
+config KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
+	bool "Enable to automatically hide ksu and susfs symbols from /proc/kallsyms"
+	depends on KSU_SUSFS
+	default y
+	help
+	  Automatically hide ksu and susfs symbols from /proc/kallsyms.
+
+config KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+	bool "Enable to spoof /proc/bootconfig (gki) or /proc/cmdline (non-gki)"
+	depends on KSU_SUSFS
+	default y
+	help
+	  Spoof /proc/cmdline with a user-defined file.
+
+config KSU_SUSFS_OPEN_REDIRECT
+	bool "Enable to redirect a path to be opened with another path"
+	depends on KSU_SUSFS
+	default y
+	help
+	  Allow redirecting a target path to be opened with another user-defined path.
+
+config KSU_SUSFS_SUS_SU
+	bool "Enable SUS-SU in runtime temporarily"
+	depends on KSU_SUSFS && KPROBES && HAVE_KPROBES && KPROBE_EVENTS
+	default n
+	help
+	  Runtime SUS-SU toggle for kprobe-based kernels.
+
+endmenu
+
 endmenu

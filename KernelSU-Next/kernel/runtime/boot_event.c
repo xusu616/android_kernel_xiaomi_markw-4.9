@@ -12,6 +12,7 @@
 #include "runtime/ksud.h"
 #include "manager/manager_observer.h"
 #include "manager/throne_tracker.h"
+#include "include/susfs_bridge.h"
 
 bool ksu_module_mounted __read_mostly = false;
 bool ksu_boot_completed __read_mostly = false;
@@ -72,6 +73,9 @@ void on_post_fs_data(void)
 	// sanity check, this may influence the performance
 	ksu_stop_input_hook_runtime();
 	ksu_selinux_hide_handle_post_fs_data();
+#ifdef CONFIG_KSU_SUSFS
+	susfs_on_post_fs_data();
+#endif
 }
 
 extern void ext4_unregister_sysfs(struct super_block *sb);
