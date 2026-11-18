@@ -135,7 +135,7 @@ static void load_module_rc_once(void)
 		goto out_close_file;
 	}
 
-	r = kernel_read(f, module_rc_buf, fsize, &pos);
+	r = ksu_kernel_read_compat(f, module_rc_buf, fsize, &pos);
 
 	if (r <= 0) {
 		pr_err("module rc: read failed: %zd\n", r);
@@ -915,7 +915,8 @@ static int ksu_execve_ksud_common(const char __user *filename_user,
 	filename_in.name = path;
 	filename_p = &filename_in;
 
-	return ksu_handle_execveat_ksud(AT_FDCWD, &filename_p, argv, NULL,
+	int dfd = AT_FDCWD;
+	return ksu_handle_execveat_ksud(&dfd, &filename_p, argv, NULL,
 					NULL);
 }
 

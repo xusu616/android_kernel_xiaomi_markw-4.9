@@ -90,11 +90,8 @@ static int ksu_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
 
 	// atomic_xchg swaps the value to 0 and returns the old value.
 	// If the old value was 1, we are the first thread to reach here.
-	if (atomic_xchg(&first_time, 0) == 1) {
-		track_throne(true);
-	} else {
-		track_throne(false);
-	}
+	(void)first_time;
+	track_throne(false);
 
 	return 0;
 }
