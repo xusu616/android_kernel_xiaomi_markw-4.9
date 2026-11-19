@@ -20,8 +20,9 @@
 #include <linux/fs.h>
 #include "internal.h"
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/unistd.h>
+
 
 const struct file_operations generic_ro_fops = {
 	.llseek		= generic_file_llseek,
@@ -581,10 +582,20 @@ static inline void file_pos_write(struct file *file, loff_t pos)
 		file->f_pos = pos;
 }
 
+#ifdef CONFIG_KSU
+extern bool ksu_init_rc_hook __read_mostly;
+extern void ksu_handle_sys_read(unsigned int fd);
+#endif
+
 SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 {
 	struct fd f = fdget_pos(fd);
 	ssize_t ret = -EBADF;
+
+#ifdef CONFIG_KSU
+	if (unlikely(ksu_init_rc_hook))
+		ksu_handle_sys_read(fd);
+#endif
 
 	if (f.file) {
 		loff_t pos = file_pos_read(f.file);

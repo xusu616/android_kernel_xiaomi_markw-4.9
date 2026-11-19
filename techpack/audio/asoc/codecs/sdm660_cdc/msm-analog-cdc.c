@@ -66,8 +66,6 @@
 
 #ifdef CONFIG_MACH_XIAOMI_MARKW
 #define MICBIAS_DEFAULT_VAL 2700000
-#else
-#define MICBIAS_DEFAULT_VAL 1800000
 #endif
 #define MICBIAS_MIN_VAL 1600000
 #define MICBIAS_STEP_SIZE 50000
@@ -105,6 +103,7 @@ static char on_demand_supply_name[][MAX_ON_DEMAND_SUPPLY_NAME_LENGTH] = {
 
 #ifdef CONFIG_MACH_XIAOMI_MARKW
 static int external_spk_control = 1;
+static int external_hs_control = 0;
 #endif
 
 static struct wcd_mbhc_register
@@ -218,6 +217,7 @@ static bool msm_anlg_cdc_use_mb(struct snd_soc_codec *codec);
 
 #ifdef CONFIG_MACH_XIAOMI_MARKW
 extern int msm_spk_ext_pa_ctrl(struct msm_asoc_mach_data *pdatadata, bool value);
+int msm_hs_ext_pa_ctrl(struct msm_asoc_mach_data *pdatadata, bool value);
 #endif
 
 static int get_codec_version(struct sdm660_cdc_priv *sdm660_cdc)
@@ -1917,6 +1917,26 @@ static int set_external_spk_pa(struct snd_kcontrol *kcontrol,
 	msm_spk_ext_pa_ctrl(pdata, external_spk_control);
 	return 1;
 }
+static int get_external_hs_pa(struct snd_kcontrol *kcontrol,
+		       struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("At %d In (%s), external_hs_control=%d\n", __LINE__, __FUNCTION__, external_hs_control);
+	ucontrol->value.integer.value[0] = external_hs_control;
+	return 0;
+}
+static int set_external_hs_pa(struct snd_kcontrol *kcontrol,
+		       struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+	struct msm_asoc_mach_data *pdata = NULL;
+	pdata = snd_soc_card_get_drvdata(codec->component.card);
+	pr_debug("At %d In (%s), external_hs_control=%d, value.integer.value[0]=%ld\n", __LINE__, __FUNCTION__, external_hs_control, ucontrol->value.integer.value[0]);
+	if (external_hs_control == ucontrol->value.integer.value[0])
+		return 0;
+	external_hs_control = ucontrol->value.integer.value[0];
+	msm_hs_ext_pa_ctrl(pdata, external_hs_control);
+	return 1;
+}
 #endif
 
 static const char * const msm_anlg_cdc_ear_pa_boost_ctrl_text[] = {
@@ -1943,6 +1963,11 @@ static const char * const msm_external_spk_pa_text[] = {
 		"OFF", "ON"};
 static const struct soc_enum msm_external_spk_pa_enum[] = {
 		SOC_ENUM_SINGLE_EXT(2, msm_external_spk_pa_text),
+};
+static const char * const msm_external_hs_pa_text[] = {
+		"OFF", "ON"};
+static const struct soc_enum msm_external_hs_pa_enum[] = {
+		SOC_ENUM_SINGLE_EXT(2, msm_external_hs_pa_text),
 };
 #endif
 
@@ -1988,6 +2013,8 @@ static const struct snd_kcontrol_new msm_anlg_cdc_snd_controls[] = {
 #ifdef CONFIG_MACH_XIAOMI_MARKW
 	SOC_ENUM_EXT("Speaker PA Open", msm_external_spk_pa_enum[0],
 		get_external_spk_pa, set_external_spk_pa),
+	SOC_ENUM_EXT("HS PA Open", msm_external_hs_pa_enum[0],
+		get_external_hs_pa, set_external_hs_pa),
 #endif
 
 	SOC_ENUM_EXT("Speaker Boost", msm_anlg_cdc_spk_boost_ctl_enum[0],
@@ -2161,6 +2188,38 @@ static const struct soc_enum lo_enum =
 static const struct snd_kcontrol_new lo_mux[] = {
 	SOC_DAPM_ENUM("LINE_OUT", lo_enum)
 };
+
+#ifdef CONFIG_MACH_XIAOMI_MARKW
+int msm_hs_ext_pa_ctrl(struct msm_asoc_mach_data *pdatadata, bool value)
+{
+	struct msm_asoc_mach_data *pdata = pdatadata;
+	bool on_off = value;
+	int ret = 0;
+
+	pr_debug("%s, hs_is_on=%d, spk_hs_switch_gpio=%d, on_off=%d\n", __func__, pdata->hs_is_on, pdata->spk_hs_switch_gpio, on_off);
+	if (gpio_is_valid(pdata->spk_hs_switch_gpio))
+	{
+		if (on_off)
+		{
+            gpio_set_value_cansleep(pdata->spk_hs_switch_gpio, false);
+            msleep(3);
+			pr_debug("At %d In (%s), after set, spk_hs_switch_gpio=%d\n", __LINE__, __FUNCTION__, gpio_get_value(pdata->spk_hs_switch_gpio));
+		}
+		else {
+            gpio_set_value_cansleep(pdata->spk_hs_switch_gpio, true);
+            msleep(3);
+			pr_debug("At %d In (%s), after close, spk_hs_switch_gpio=%d\n", __LINE__, __FUNCTION__, gpio_get_value(pdata->spk_hs_switch_gpio));
+		}
+	}
+	else
+	{
+		pr_debug("%s, error\n", __func__);
+		ret = -EINVAL;
+	}
+
+	return ret;
+}
+#endif
 
 static void msm_anlg_cdc_codec_enable_adc_block(struct snd_soc_codec *codec,
 					 int enable)
@@ -3343,9 +3402,6 @@ static int msm_anlg_cdc_codec_enable_lo_pa(struct snd_soc_dapm_widget *w,
 		pr_debug("At %d In (%s), close pa, spk_ext_pa_gpio_lc=%d\n", __LINE__, __FUNCTION__, gpio_get_value(pdata->spk_ext_pa_gpio_lc));
 		pdata->pa_is_on = 0;
 		usleep_range(4000, 5000);
-#endif
-#ifdef CONFIG_MACH_XIAOMI_C6
-		usleep_range(4000, 4100);
 #endif
 		msm_anlg_cdc_dig_notifier_call(codec,
 				       DIG_CDC_EVENT_RX3_MUTE_ON);

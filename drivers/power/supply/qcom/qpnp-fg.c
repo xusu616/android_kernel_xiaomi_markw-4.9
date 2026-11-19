@@ -239,16 +239,11 @@ enum fg_mem_data_index {
 
 static struct fg_mem_setting settings[FG_MEM_SETTING_MAX] = {
 	/*       ID                    Address, Offset, Value*/
-#ifdef CONFIG_MACH_XIAOMI_C6
-	SETTING(SOFT_COLD,       0x454,   0,      150),
+#ifdef CONFIG_MACH_XIAOMI_MARKW	
+	SETTING(SOFT_COLD,       0x454,   0,      100),
 	SETTING(SOFT_HOT,        0x454,   1,      450),
 	SETTING(HARD_COLD,       0x454,   2,      0),
-	SETTING(HARD_HOT,        0x454,   3,      550),
-#else
-	SETTING(SOFT_COLD,       0x454,   0,      100),
-	SETTING(SOFT_HOT,        0x454,   1,      400),
-	SETTING(HARD_COLD,       0x454,   2,      50),
-	SETTING(HARD_HOT,        0x454,   3,      450),
+	SETTING(HARD_HOT,        0x454,   3,      600),
 #endif
 	SETTING(RESUME_SOC,      0x45C,   1,      0),
 	SETTING(BCL_LM_THRESHOLD, 0x47C,   2,      50),
@@ -256,11 +251,9 @@ static struct fg_mem_setting settings[FG_MEM_SETTING_MAX] = {
 	SETTING(TERM_CURRENT,	 0x40C,   2,      250),
 	SETTING(CHG_TERM_CURRENT, 0x4F8,   2,      250),
 	SETTING(IRQ_VOLT_EMPTY,	 0x458,   3,      3100),
-	SETTING(CUTOFF_VOLTAGE,  0x40C,   0,      3400),
-#ifdef CONFIG_MACH_XIAOMI_C6
-	SETTING(VBAT_EST_DIFF,	 0x000,   0,      200),
-#else
-	SETTING(VBAT_EST_DIFF,	 0x000,   0,      30),
+	SETTING(CUTOFF_VOLTAGE,	 0x40C,   0,      3200),
+#ifdef CONFIG_MACH_XIAOMI_MARKW	
+	SETTING(VBAT_EST_DIFF,	 0x000,   0,      100),
 #endif
 	SETTING(DELTA_SOC,	 0x450,   3,      1),
 	SETTING(BATT_LOW,	 0x458,   0,      4200),
@@ -338,16 +331,17 @@ module_param_named(
 	first_est_dump, fg_est_dump, int, 00600
 );
 
+#ifdef CONFIG_MACH_XIAOMI_MARKW	
+char *fg_batt_type;
+static char *FG_BATT_TYPE_DEFAULT = "Default_Coslight_4000mah";
+#else
 static char *fg_batt_type;
+#endif
 module_param_named(
 	battery_type, fg_batt_type, charp, 00600
 );
 
-#ifdef CONFIG_MACH_XIAOMI_C6
 static int fg_sram_update_period_ms = 3000;
-#else
-static int fg_sram_update_period_ms = 30000;
-#endif
 module_param_named(
 	sram_update_period_ms, fg_sram_update_period_ms, int, 00600
 );
@@ -2040,13 +2034,10 @@ static void fg_handle_battery_insertion(struct fg_chip *chip)
 	schedule_delayed_work(&chip->update_sram_data, msecs_to_jiffies(0));
 }
 
-
-#ifndef CONFIG_MACH_XIAOMI_C6
 static int soc_to_setpoint(int soc)
 {
 	return DIV_ROUND_CLOSEST(soc * 255, 100);
 }
-#endif
 
 static void batt_to_setpoint_adc(int vbatt_mv, u8 *data)
 {
@@ -2268,7 +2259,7 @@ static int get_prop_capacity(struct fg_chip *chip)
 		if (chip->last_soc == FULL_SOC_RAW)
 			return FULL_CAPACITY;
 		return DIV_ROUND_CLOSEST((chip->last_soc - 1) *
-				(FULL_CAPACITY - 1),
+				(FULL_CAPACITY - 2),
 				FULL_SOC_RAW - 2) + 1;
 	}
 
@@ -2296,7 +2287,7 @@ static int get_prop_capacity(struct fg_chip *chip)
 
 			if (!vbatt_low_sts)
 				return DIV_ROUND_CLOSEST((chip->last_soc - 1) *
-						(FULL_CAPACITY - 1),
+						(FULL_CAPACITY - 2),
 						FULL_SOC_RAW - 2) + 1;
 			else
 				return EMPTY_CAPACITY;
@@ -2307,7 +2298,7 @@ static int get_prop_capacity(struct fg_chip *chip)
 		return FULL_CAPACITY;
 	}
 
-	return DIV_ROUND_CLOSEST((msoc - 1) * (FULL_CAPACITY - 1),
+	return DIV_ROUND_CLOSEST((msoc - 1) * (FULL_CAPACITY - 2),
 			FULL_SOC_RAW - 2) + 1;
 }
 
@@ -2674,20 +2665,6 @@ out:
 	return rc;
 }
 
-// Read the beat count and write it into the beat_count arg;
-// return non-zero on failure.
-static int read_beat(struct fg_chip *chip, u8 *beat_count)
-{
-	int rc = fg_read(chip, beat_count,
-			 chip->mem_base + MEM_INTF_FG_BEAT_COUNT, 1);
-	if (rc)
-		pr_err("failed to read beat count rc=%d\n", rc);
-	else if (fg_debug_mask & FG_STATUS)
-		pr_info("current: %d, prev: %d\n", *beat_count,
-			chip->last_beat_count);
-	return rc;
-}
-
 #define SANITY_CHECK_PERIOD_MS	5000
 static void check_sanity_work(struct work_struct *work)
 {
@@ -2698,24 +2675,19 @@ static void check_sanity_work(struct work_struct *work)
 	u8 beat_count;
 	bool tried_once = false;
 
-	// Try one beat check once up-front to avoid the common
-	// case where the beat has changed and we don't need to hold
-	// the chip awake.
-	rc = read_beat(chip, &beat_count);
-	if (rc == 0 && chip->last_beat_count != beat_count) {
-		chip->last_beat_count = beat_count;
-		schedule_delayed_work(
-			&chip->check_sanity_work,
-			msecs_to_jiffies(SANITY_CHECK_PERIOD_MS));
-		return;
-	}
-
 	fg_stay_awake(&chip->sanity_wakeup_source);
 
 try_again:
-	rc = read_beat(chip, &beat_count);
-	if (rc)
+	rc = fg_read(chip, &beat_count,
+			chip->mem_base + MEM_INTF_FG_BEAT_COUNT, 1);
+	if (rc) {
+		pr_err("failed to read beat count rc=%d\n", rc);
 		goto resched;
+	}
+
+	if (fg_debug_mask & FG_STATUS)
+		pr_info("current: %d, prev: %d\n", beat_count,
+			chip->last_beat_count);
 
 	if (chip->last_beat_count == beat_count) {
 		if (!tried_once) {
@@ -3253,28 +3225,18 @@ static int estimate_battery_age(struct fg_chip *chip, int *actual_capacity)
 
 	batt_temp = get_sram_prop_now(chip, FG_DATA_BATT_TEMP);
 	if (batt_temp < 150 || batt_temp > 400) {
-#ifdef CONFIG_QPNP_FG_DEBUG
-		pr_info("qpnp-fg: Battery temp (%d) out of range, aborting\n",
-					(int)batt_temp);
-#else
 		if (fg_debug_mask & FG_AGING)
 			pr_info("Battery temp (%d) out of range, aborting\n",
 					(int)batt_temp);
-#endif
 		rc = 0;
 		goto done;
 	}
 
 	battery_soc = get_battery_soc_raw(chip) * 100 / FULL_PERCENT_3B;
 	if (battery_soc < 25 || battery_soc > 75) {
-#ifdef CONFIG_QPNP_FG_DEBUG
-		pr_info("qpnp-fg: Battery SoC (%d) out of range, aborting\n",
-					(int)battery_soc);
-#else
 		if (fg_debug_mask & FG_AGING)
 			pr_info("Battery SoC (%d) out of range, aborting\n",
 					(int)battery_soc);
-#endif
 		rc = 0;
 		goto done;
 	}
@@ -3334,14 +3296,9 @@ static int estimate_battery_age(struct fg_chip *chip, int *actual_capacity)
 
 	*actual_capacity = div64_s64(((int64_t)chip->nom_cap_uah)
 				* (1000 - unusable_soc), 1000);
-#ifdef CONFIG_QPNP_FG_DEBUG
-	 pr_info("qpnp-fg: nom cap = %d, actual cap = %d\n",
-			chip->nom_cap_uah, *actual_capacity);
-#else
 	if (fg_debug_mask & FG_AGING)
 		pr_info("nom cap = %d, actual cap = %d\n",
 				chip->nom_cap_uah, *actual_capacity);
-#endif
 
 	return rc;
 
@@ -3769,11 +3726,11 @@ static void fg_cap_learning_post_process(struct fg_chip *chip)
 		return;
 	}
 
-	max_inc_val = (int64_t)chip->learning_data.learned_cc_uah
+	max_inc_val = chip->learning_data.learned_cc_uah
 			* (1000 + chip->learning_data.max_increment);
 	max_inc_val = div_s64(max_inc_val, 1000);
 
-	min_dec_val = (int64_t)chip->learning_data.learned_cc_uah
+	min_dec_val = chip->learning_data.learned_cc_uah
 			* (1000 - chip->learning_data.max_decrement);
 	min_dec_val = div_s64(min_dec_val, 1000);
 
@@ -3840,19 +3797,12 @@ static int fg_cap_learning_check(struct fg_chip *chip)
 				&& !chip->learning_data.active
 				&& chip->batt_aging_mode == FG_AGING_CC) {
 		if (chip->learning_data.learned_cc_uah == 0) {
-#ifdef CONFIG_QPNP_FG_DEBUG
-			pr_info("qpnp-fg: no capacity, aborting\n");
-#else
 			if (fg_debug_mask & FG_AGING)
 				pr_info("no capacity, aborting\n");
-#endif
 			goto fail;
 		}
 
 		if (!fg_is_temperature_ok_for_learning(chip))
-#ifdef CONFIG_QPNP_FG_DEBUG
-			pr_info("qpnp-fg: learning capacity failed, battery temperature isn't passed!\n");
-#endif
 			goto fail;
 
 		fg_mem_lock(chip);
@@ -3870,29 +3820,17 @@ static int fg_cap_learning_check(struct fg_chip *chip)
 			}
 		}
 		battery_soc = get_battery_soc_raw(chip);
-#ifdef CONFIG_QPNP_FG_DEBUG
-		pr_info("qpnp-fg: checking battery soc (%d vs %d)\n",
-			battery_soc * 100 / FULL_PERCENT_3B,
-			chip->learning_data.max_start_soc);
-#else
 		if (fg_debug_mask & FG_AGING)
 			pr_info("checking battery soc (%d vs %d)\n",
 				battery_soc * 100 / FULL_PERCENT_3B,
 				chip->learning_data.max_start_soc);
-#endif
 		/* check if the battery is low enough to start soc learning */
 		if (battery_soc * 100 / FULL_PERCENT_3B
 				> chip->learning_data.max_start_soc) {
-#ifdef CONFIG_QPNP_FG_DEBUG
-			pr_info("qpnp-fg: battery soc too high (%d > %d), aborting\n",
-				battery_soc * 100 / FULL_PERCENT_3B,
-				chip->learning_data.max_start_soc);
-#else
 			if (fg_debug_mask & FG_AGING)
 				pr_info("battery soc too high (%d > %d), aborting\n",
 					battery_soc * 100 / FULL_PERCENT_3B,
 					chip->learning_data.max_start_soc);
-#endif
 			fg_mem_release(chip);
 			fg_cap_learning_stop(chip);
 			goto fail;
@@ -3915,15 +3853,9 @@ static int fg_cap_learning_check(struct fg_chip *chip)
 
 			chip->learning_data.init_cc_pc_val = cc_pc_val;
 			chip->learning_data.active = true;
-#ifdef CONFIG_QPNP_FG_DEBUG
-			pr_info("qpnp-fg: cap learning started, soc = %d cc_uah = %lld\n",
-				battery_soc * 100 / FULL_PERCENT_3B,
-				chip->learning_data.cc_uah);
-#else
 			if (fg_debug_mask & FG_AGING)
 				pr_info("SW_CC_SOC based learning init_CC_SOC=%d\n",
 					chip->learning_data.init_cc_pc_val);
-#endif
 		} else {
 			rc = fg_mem_masked_write(chip, CBITS_INPUT_FILTER_REG,
 					IBATTF_TAU_MASK, IBATTF_TAU_99_S, 0);
@@ -3957,12 +3889,8 @@ static int fg_cap_learning_check(struct fg_chip *chip)
 		}
 	} else if ((chip->status != POWER_SUPPLY_STATUS_CHARGING)
 				&& chip->learning_data.active) {
-#ifdef CONFIG_QPNP_FG_DEBUG
-		pr_info("qpnp-fg: capacity learning stopped\n");
-#else
 		if (fg_debug_mask & FG_AGING)
 			pr_info("capacity learning stopped\n");
-#endif
 		if (!(chip->wa_flag & USE_CC_SOC_REG))
 			alarm_try_to_cancel(&chip->fg_cap_learning_alarm);
 
@@ -4079,12 +4007,9 @@ static int set_prop_enable_charging(struct fg_chip *chip, bool enable)
 	}
 
 	chip->charging_disabled = !enable;
-#ifdef CONFIG_QPNP_FG_DEBUG
-	pr_info("qpnp-fg: %sabling charging\n", enable ? "en" : "dis");
-#else
 	if (fg_debug_mask & FG_STATUS)
 		pr_info("%sabling charging\n", enable ? "en" : "dis");
-#endif
+
 	return rc;
 }
 
@@ -4099,12 +4024,8 @@ static void status_change_work(struct work_struct *work)
 	bool batt_missing = is_battery_missing(chip);
 
 	if (batt_missing) {
-#ifdef CONFIG_QPNP_FG_DEBUG
-		pr_info("Battery is missing!\n");
-#else
 		if (fg_debug_mask & FG_STATUS)
 			pr_info("Battery is missing\n");
-#endif
 		return;
 	}
 
@@ -4114,43 +4035,8 @@ static void status_change_work(struct work_struct *work)
 	}
 
 	if (chip->status == POWER_SUPPLY_STATUS_FULL) {
-#ifdef CONFIG_QPNP_FG_DEBUG
-		if (capacity <= 98) {
-			pr_info("qpnp-fg: Current capacity is :%d, abort hold soc!", capacity);
-		} else if (capacity >= 99) {
-			pr_info("qpnp-fg: Battery capacity is :%d, check hold soc now!\n", capacity);
-
-			if (chip->hold_soc_while_full) {
-				pr_info("qpnp-fg: Hold soc while full passed!\n");
-
-				if (chip->health == POWER_SUPPLY_HEALTH_GOOD
-				|| chip->health == POWER_SUPPLY_HEALTH_COOL
-				|| chip->health == POWER_SUPPLY_HEALTH_WARM) {
-					pr_info("qpnp-fg: Battery in good condition, hold soc now!\n");
-					chip->charge_full = true;
-					pr_info("qpnp-fg: Checking charge_full status...\n");
-					if (chip->charge_full) {
-						pr_info("qpnp-fg: charge_full success!\n");
-						pr_info("qpnp-fg: Battery capacity is :%d, while charge_full\n", capacity);
-					} else {
-						pr_info("qpnp-fg: charge_full failed!\n");
-						 pr_info("qpnp-fg: Battery capacity is :%d, while not charge_full\n", capacity);
-					}
-				} else {
-					pr_info("qpnp-fg: Battery status unknown, abort hold soc!\n");
-					pr_info("qpnp-fg: Battery capacity is :%d, while failed to hold_soc\n", capacity);
-				}
-			} else {
-				pr_info("qpnp-fg: Hold soc while full failed!\n");
-			}
-		} else {
-			pr_info("qpnp-fg: Battery capacity less than 99\n");
-		}
-#else
 		if (capacity >= 99 && chip->hold_soc_while_full
-				&& (chip->health == POWER_SUPPLY_HEALTH_GOOD
-				|| chip->health == POWER_SUPPLY_HEALTH_COOL
-				|| chip->health == POWER_SUPPLY_HEALTH_WARM)) {
+				&& chip->health == POWER_SUPPLY_HEALTH_GOOD) {
 			if (fg_debug_mask & FG_STATUS)
 				pr_info("holding soc at 100\n");
 			chip->charge_full = true;
@@ -4158,7 +4044,6 @@ static void status_change_work(struct work_struct *work)
 			pr_info("terminated charging at %d/0x%02x\n",
 					capacity, get_monotonic_soc_raw(chip));
 		}
-#endif
 	}
 	if (chip->status == POWER_SUPPLY_STATUS_FULL ||
 			chip->status == POWER_SUPPLY_STATUS_CHARGING) {
@@ -4167,20 +4052,12 @@ static void status_change_work(struct work_struct *work)
 			enable_irq(chip->batt_irq[VBATT_LOW].irq);
 			enable_irq_wake(chip->batt_irq[VBATT_LOW].irq);
 			chip->vbat_low_irq_enabled = true;
-#ifdef CONFIG_QPNP_FG_DEBUG
-			pr_info("qpnp-fg: Battery full or Charged, full soc enable!\n");
-			pr_info("qpnp-fg: Current capacity: %d\n", capacity);
-#endif
 		}
 
 		if (!chip->full_soc_irq_enabled) {
 			enable_irq(chip->soc_irq[FULL_SOC].irq);
 			enable_irq_wake(chip->soc_irq[FULL_SOC].irq);
 			chip->full_soc_irq_enabled = true;
-#ifdef CONFIG_QPNP_FG_DEBUG
-			pr_info("qpnp-fg: Battery full or Charged, full soc enable!\n");
-			pr_info("qpnp-fg: Current capacity: %d\n", capacity);
-#endif
 		}
 
 		if (!!(chip->wa_flag & PULSE_REQUEST_WA) && capacity == 100)
@@ -4191,20 +4068,12 @@ static void status_change_work(struct work_struct *work)
 			disable_irq_wake(chip->batt_irq[VBATT_LOW].irq);
 			disable_irq_nosync(chip->batt_irq[VBATT_LOW].irq);
 			chip->vbat_low_irq_enabled = false;
-#ifdef CONFIG_QPNP_FG_DEBUG
-			pr_info("qpnp-fg: Battery discharged, low irq enable!\n");
-			pr_info("qpnp-fg: Current capacity: %d\n", capacity);
-#endif
 		}
 
 		if (chip->full_soc_irq_enabled) {
 			disable_irq_wake(chip->soc_irq[FULL_SOC].irq);
 			disable_irq_nosync(chip->soc_irq[FULL_SOC].irq);
 			chip->full_soc_irq_enabled = false;
-#ifdef CONFIG_QPNP_FG_DEBUG
-			pr_info("qpnp-fg: Battery dishcarged, full soc enable!\n");
-			pr_info("qpnp-fg: Current capacity: %d\n", capacity);
-#endif
 		}
 	}
 	fg_cap_learning_check(chip);
@@ -4619,7 +4488,7 @@ static bool fg_validate_battery_info(struct fg_chip *chip)
 	batt_soc = get_monotonic_soc_raw(chip);
 	if (batt_soc != 0 && batt_soc != FULL_SOC_RAW)
 		batt_soc = DIV_ROUND_CLOSEST((batt_soc - 1) *
-				(FULL_CAPACITY - 1), FULL_SOC_RAW - 2) + 1;
+				(FULL_CAPACITY - 2), FULL_SOC_RAW - 2) + 1;
 
 	if (*chip->batt_range_ocv && chip->batt_max_voltage_uv > 1000)
 		delta_pct =  DIV_ROUND_CLOSEST(abs(batt_volt_mv -
@@ -4772,11 +4641,7 @@ static int fg_power_get_property(struct power_supply *psy,
 			val->intval = 1;
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
-#ifdef CONFIG_MACH_XIAOMI_C6
-		val->intval = 4100000;
-#else
 		val->intval = chip->nom_cap_uah;
-#endif
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL:
 		val->intval = chip->learning_data.learned_cc_uah;
@@ -6361,8 +6226,6 @@ try_again:
 		goto fail;
 	}
 
-	msleep(2000);
-
 	/* wait for the first estimate to complete */
 	rc = wait_for_completion_interruptible_timeout(&chip->first_soc_done,
 			msecs_to_jiffies(PROFILE_LOAD_TIMEOUT_MS));
@@ -6535,10 +6398,6 @@ wait:
 
 	rc = of_property_read_u32(profile_node, "qcom,max-voltage-uv",
 					&chip->batt_max_voltage_uv);
-
-#ifdef CONFIG_MACH_XIAOMI_C6
-	chip->batt_max_voltage_uv = 4380000;
-#endif
 
 	if (rc)
 		pr_warn("couldn't find battery max voltage\n");
@@ -7222,13 +7081,8 @@ static int fg_of_init(struct fg_chip *chip)
 	OF_READ_PROPERTY(chip->evaluation_current,
 			"aging-eval-current-ma", rc,
 			DEFAULT_EVALUATION_CURRENT_MA);
-#ifdef CONFIG_MACH_XIAOMI_C6
-	OF_READ_PROPERTY(chip->cc_cv_threshold_mv,
-			"fg-cc-cv-threshold-mv-global", rc, 0);
-#else
 	OF_READ_PROPERTY(chip->cc_cv_threshold_mv,
 			"fg-cc-cv-threshold-mv", rc, 0);
-#endif
 	if (of_property_read_bool(chip->pdev->dev.of_node,
 				"qcom,capacity-learning-on"))
 		chip->batt_aging_mode = FG_AGING_CC;
@@ -8187,11 +8041,7 @@ static int fg_common_hw_init(struct fg_chip *chip)
 	}
 
 	rc = fg_mem_masked_write(chip, settings[FG_MEM_DELTA_SOC].address, 0xFF,
-#ifdef CONFIG_MACH_XIAOMI_C6
 			1,
-#else
-			soc_to_setpoint(settings[FG_MEM_DELTA_SOC].value),
-#endif
 			settings[FG_MEM_DELTA_SOC].offset);
 	if (rc) {
 		pr_err("failed to write delta soc rc=%d\n", rc);

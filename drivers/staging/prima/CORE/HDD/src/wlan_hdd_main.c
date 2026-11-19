@@ -1358,7 +1358,7 @@ hdd_extract_assigned_int_from_str
 {
     int tempInt;
     int v = 0;
-    char buf[33];
+    char buf[32];
     int val = 0;
     *pLastArg = FALSE;
 
@@ -8528,14 +8528,6 @@ int hdd_mon_open (struct net_device *dev)
 
     vos_ssr_protect(__func__);
     ret = __hdd_mon_open(dev);
-    // Register wireless extensions
-    if( VOS_STATUS_SUCCESS !=  (ret = hdd_register_wext(dev)))
-    {
-	hddLog(VOS_TRACE_LEVEL_FATAL,
-	       "hdd_register_wext() failed with status code %08d [x%08x]",
-	        ret, ret);
-	ret = VOS_STATUS_E_FAILURE;
-    }
     vos_ssr_unprotect(__func__);
 
     return ret;
@@ -10315,6 +10307,15 @@ hdd_adapter_t* hdd_open_adapter( hdd_context_t *pHddCtx, tANI_U8 session_type,
 
          pAdapter->device_mode = session_type;
          pAdapter->wdev.iftype = NL80211_IFTYPE_MONITOR;
+
+         // Register wireless extensions
+         if( VOS_STATUS_SUCCESS !=  (status = hdd_register_wext(pAdapter->dev)))
+         {
+              hddLog(VOS_TRACE_LEVEL_FATAL,
+                   "hdd_register_wext() failed with status code %08d [x%08x]",
+                                                      status, status );
+              status = VOS_STATUS_E_FAILURE;
+         }
 
 #if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,29)
          pAdapter->dev->netdev_ops = &wlan_mon_drv_ops;

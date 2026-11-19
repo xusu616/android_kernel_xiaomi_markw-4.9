@@ -117,7 +117,6 @@
 				qcom,hw-settle-time = <0>;
 				qcom,fast-avg-setup = <0>;
 				qcom,vadc-thermal-node;
-				status = "disabled";
 			};
 
 			chan@43 {
@@ -577,7 +576,7 @@
 			
 			pmi8950_torch2: qcom,torch_2 {
 				label = "torch";
-				qcom,led-name = "flashlight";
+				qcom,led-name = "led:torch_2";
 				qcom,default-led-trigger =
 						"torch2_trigger";
 				qcom,max-current = <200>;
